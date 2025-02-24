@@ -50,7 +50,7 @@ export class FigmaService {
 
 function writeLogs(name: string, value: any) {
   try {
-    if (process.env.NODE_ENV !== "development") return;
+    // if (process.env.NODE_ENV !== "development") return;
 
     const logsDir = "logs";
 

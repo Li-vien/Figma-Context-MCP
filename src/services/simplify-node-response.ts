@@ -7,7 +7,7 @@ import type {
   RGBA,
 } from "@figma/rest-api-spec";
 import { hasValue, isRectangle, isStrokeWeights, isTruthy } from "~/utils/identity";
-
+import {removeEmptyKeys} from '~/utils/common'
 /**
  * TDOO ITEMS
  *
@@ -137,7 +137,7 @@ function parseNode(n: FigmaDocumentNode, parent?: FigmaDocumentNode): Simplified
   if (hasValue("characters", n, isTruthy)) {
     simplified.text = n.characters;
   }
-  if (hasValue("style", n)) {
+  if (hasValue("style", n) && Object.keys(n.style).length) {
     const style = n.style;
     simplified.textStyle = {
       fontFamily: style.fontFamily,
@@ -158,10 +158,10 @@ function parseNode(n: FigmaDocumentNode, parent?: FigmaDocumentNode): Simplified
   }
 
   // fills & strokes
-  if (hasValue("fills", n) && Array.isArray(n.fills)) {
+  if (hasValue("fills", n) && Array.isArray(n.fills) && n.fills.length) {
     simplified.fills = n.fills.map(parsePaint);
   }
-  if (hasValue("strokes", n) && Array.isArray(n.strokes)) {
+  if (hasValue("strokes", n) && Array.isArray(n.strokes) && n.strokes.length) {
     simplified.strokes = n.strokes.map(parsePaint);
   }
 
@@ -173,7 +173,7 @@ function parseNode(n: FigmaDocumentNode, parent?: FigmaDocumentNode): Simplified
   ) {
     simplified.strokeWeight = n.strokeWeight;
   }
-  if (hasValue("strokeDashes", n) && Array.isArray(n.strokeDashes)) {
+  if (hasValue("strokeDashes", n) && Array.isArray(n.strokeDashes) && n.strokeDashes.length) {
     simplified.strokeDashes = n.strokeDashes;
   }
   if (hasValue("individualStrokeWeights", n, isStrokeWeights)) {
@@ -195,7 +195,7 @@ function parseNode(n: FigmaDocumentNode, parent?: FigmaDocumentNode): Simplified
   }
 
   // layout data
-  simplified.layout = buildSimplifiedLayout(n, parent);
+  simplified.layout = removeEmptyKeys(buildSimplifiedLayout(n, parent));
 
   // children - pass the current node as parent
   if (hasValue("children", n) && n.children.length > 0) {
