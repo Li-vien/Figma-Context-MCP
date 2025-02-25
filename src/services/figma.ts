@@ -39,7 +39,7 @@ export class FigmaService {
   }
 
   async getNode(fileKey: string, nodeId: string, depth?: number): Promise<SimplifiedDesign> {
-    const endpoint = `/files/${fileKey}/nodes?ids=${nodeId}${depth ? `&depth=${depth}` : ""}`;
+    const endpoint = `/files/${fileKey}/nodes?ids=${nodeId}${depth ? `&depth=10` : ""}`;
     const response = await this.request<GetFileNodesResponse>(endpoint);
     writeLogs("figma-raw.json", response);
     const simplifiedResponse = parseFigmaResponse(response);
