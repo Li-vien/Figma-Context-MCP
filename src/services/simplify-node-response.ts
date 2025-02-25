@@ -6,8 +6,8 @@ import type {
   Vector,
   RGBA,
 } from "@figma/rest-api-spec";
-import { hasValue, isRectangle, isStrokeWeights, isTruthy } from "~/utils/identity";
-import {removeEmptyKeys} from '~/utils/common'
+import { hasValue, isStrokeWeights, isTruthy } from "~/utils/identity";
+import {removeEmptyKeys, formatRGBAColor, convertColor, generateVarId} from '~/utils/common'
 /**
  * TDOO ITEMS
  *
@@ -26,6 +26,7 @@ export interface SimplifiedDesign {
   nodes: SimplifiedNode[];
   components?: Record<string, SimplifiedComponent>;
   componentSets?: Record<string, SimplifiedComponentSet>;
+  globalVars: Record<string, any>;
 }
 
 export interface SimplifiedComponent {
@@ -51,34 +52,20 @@ export interface SimplifiedNode {
   boundingBox?: BoundingBox;
   // text
   text?: string;
-  textStyle?: Partial<{
-    fontFamily: string;
-    fontWeight: number;
-    fontSize: number;
-    lineHeight: string;
-    letterSpacing: string;
-    textCase: string;
-    textAlignHorizontal: string;
-    textAlignVertical: string;
-  }>;
+  textStyle?: string;
   // appearance
   fill?: string;
-  fills?: SimplifiedFill[];
-  strokes?: SimplifiedFill[];
+  fills?: SimplifiedFill[] | string;
+  strokes?: SimplifiedFill[] | string ;
   opacity?: number;
   borderRadius?: string;
   // layout & alignment
-  layout?: SimplifiedLayout;
+  layout?: SimplifiedLayout | string;
   // backgroundColor?: ColorValue; // Deprecated by Figma API
   // for rect-specific strokes, etc.
   strokeWeight?: number;
   strokeDashes?: number[];
-  individualStrokeWeights?: {
-    top: number;
-    right: number;
-    bottom: number;
-    left: number;
-  };
+  individualStrokeWeights?: string;
   // children
   children?: SimplifiedNode[];
 }
@@ -91,15 +78,16 @@ export interface BoundingBox {
 }
 
 export interface SimplifiedFill {
-  type: Paint["type"];
+  type?: Paint["type"];
   hex?: string;
+  rgba?: string;
   opacity?: number;
   imageRef?: string;
   scaleMode?: string;
   gradientHandlePositions?: Vector[];
   gradientStops?: {
     position: number;
-    color: ColorValue;
+    color: ColorValue | string;
   }[];
 }
 
@@ -112,19 +100,49 @@ export interface ColorValue {
 
 export function parseFigmaResponse(data: GetFileNodesResponse): SimplifiedDesign {
   const { name, lastModified, thumbnailUrl, nodes } = data;
-
-  // Potentially gather all top-level nodes into an array
-  const simplifiedNodes: SimplifiedNode[] = Object.values(nodes).map((n) => parseNode(n.document));
+  const globalVars: Record<string, any> = {};
+  
+  const simplifiedNodes: SimplifiedNode[] = Object.values(nodes).map(
+    (n) => parseNode(globalVars, n.document)
+  );
 
   return {
     name,
     lastModified,
     thumbnailUrl,
     nodes: simplifiedNodes,
+    globalVars,
   };
 }
 
-function parseNode(n: FigmaDocumentNode, parent?: FigmaDocumentNode): SimplifiedNode {
+/**
+ * 查找或创建全局变量
+ * @param globalVars - 全局变量对象
+ * @param value - 要存储的值
+ * @param prefix - 变量ID前缀
+ * @returns 变量ID
+ */
+function findOrCreateVar(
+  globalVars: Record<string, any>, 
+  value: any, 
+  prefix: string
+): string {
+  // 查找是否存在相同的值
+  const existingVarId = Object.entries(globalVars).find(
+    ([_, existingValue]) => JSON.stringify(existingValue) === JSON.stringify(value)
+  )?.[0];
+
+  if (existingVarId) {
+    return existingVarId;
+  }
+
+  // 不存在则创建新的变量
+  const varId = generateVarId(prefix);
+  globalVars[varId] = value;
+  return varId;
+}
+
+function parseNode(globalVars: Record<string, any>, n: FigmaDocumentNode, parent?: FigmaDocumentNode): SimplifiedNode {
   const { id, name, type } = n;
 
   const simplified: SimplifiedNode = {
@@ -133,36 +151,40 @@ function parseNode(n: FigmaDocumentNode, parent?: FigmaDocumentNode): Simplified
     type,
   };
 
-  // text
-  if (hasValue("characters", n, isTruthy)) {
-    simplified.text = n.characters;
-  }
+  // 处理文本样式
   if (hasValue("style", n) && Object.keys(n.style).length) {
-    const style = n.style;
-    simplified.textStyle = {
-      fontFamily: style.fontFamily,
-      fontWeight: style.fontWeight,
-      fontSize: style.fontSize,
-      lineHeight:
-        style.lineHeightPx && style.fontSize
-          ? `${style.lineHeightPx / style.fontSize}em`
-          : undefined,
-      letterSpacing:
-        style.letterSpacing && style.letterSpacing !== 0 && style.fontSize
-          ? `${(style.letterSpacing / style.fontSize) * 100}%`
-          : undefined,
-      textCase: style.textCase,
-      textAlignHorizontal: style.textAlignHorizontal,
-      textAlignVertical: style.textAlignVertical,
+    const textStyle = {
+      fontFamily: n.style.fontFamily,
+      fontWeight: n.style.fontWeight,
+      fontSize: n.style.fontSize,
+      lineHeight: n.style.lineHeightPx ? `${n.style.lineHeightPx}px` : undefined,
+      letterSpacing: n.style.letterSpacing ? `${n.style.letterSpacing}px` : undefined,
+      textCase: n.style.textCase,
+      textAlignHorizontal: n.style.textAlignHorizontal,
+      textAlignVertical: n.style.textAlignVertical,
     };
+    simplified.textStyle = findOrCreateVar(globalVars, textStyle, 'style');
   }
 
   // fills & strokes
   if (hasValue("fills", n) && Array.isArray(n.fills) && n.fills.length) {
-    simplified.fills = n.fills.map(parsePaint);
+    const fills = n.fills.map(parsePaint);
+    simplified.fills = findOrCreateVar(globalVars, fills, 'fill');
   }
   if (hasValue("strokes", n) && Array.isArray(n.strokes) && n.strokes.length) {
-    simplified.strokes = n.strokes.map(parsePaint);
+    const strokes = n.strokes.map(parsePaint);
+    simplified.strokes = findOrCreateVar(globalVars, strokes, 'stroke');
+  }
+
+  // 处理布局
+  const layout = buildSimplifiedLayout(n, parent);
+  if (layout) {
+    simplified.layout = findOrCreateVar(globalVars, layout, 'layout');
+  }
+
+  // 其他简单属性直接保留
+  if (hasValue("characters", n, isTruthy)) {
+    simplified.text = n.characters;
   }
 
   // border/corner
@@ -176,13 +198,15 @@ function parseNode(n: FigmaDocumentNode, parent?: FigmaDocumentNode): Simplified
   if (hasValue("strokeDashes", n) && Array.isArray(n.strokeDashes) && n.strokeDashes.length) {
     simplified.strokeDashes = n.strokeDashes;
   }
+
   if (hasValue("individualStrokeWeights", n, isStrokeWeights)) {
-    simplified.individualStrokeWeights = {
+    const strokeWeights = {
       top: n.individualStrokeWeights.top,
       right: n.individualStrokeWeights.right,
       bottom: n.individualStrokeWeights.bottom,
       left: n.individualStrokeWeights.left,
     };
+    simplified.individualStrokeWeights = findOrCreateVar(globalVars, strokeWeights, 'weights');
   }
 
   // opacity
@@ -194,31 +218,23 @@ function parseNode(n: FigmaDocumentNode, parent?: FigmaDocumentNode): Simplified
     simplified.borderRadius = `${n.cornerRadius}px`;
   }
 
-  // layout data
-  simplified.layout = removeEmptyKeys(buildSimplifiedLayout(n, parent));
-
-  // children - pass the current node as parent
+  // 递归处理子节点
   if (hasValue("children", n) && n.children.length > 0) {
-    simplified.children = n.children.map((child) => parseNode(child, n));
+    simplified.children = n.children.map((child) => parseNode(globalVars, child, n));
   }
 
-  return simplified;
+  return removeEmptyKeys(simplified);
 }
 
 function parsePaint(raw: Paint): SimplifiedFill {
   if (raw.type === "IMAGE") {
     return {
-      type: "IMAGE",
       imageRef: raw.imageRef,
       scaleMode: raw.scaleMode,
     };
   } else if (raw.type === "SOLID") {
-    // treat as SOLID
-    const { hex, opacity } = convertColor(raw.color!, raw.opacity);
     return {
-      type: "SOLID",
-      hex,
-      opacity,
+      rgba: formatRGBAColor(raw.color!, raw.opacity)
     };
   } else if (
     ["GRADIENT_LINEAR", "GRADIENT_RADIAL", "GRADIENT_ANGULAR", "GRADIENT_DIAMOND"].includes(
@@ -231,7 +247,7 @@ function parsePaint(raw: Paint): SimplifiedFill {
       gradientHandlePositions: raw.gradientHandlePositions,
       gradientStops: raw.gradientStops.map(({ position, color }) => ({
         position,
-        color: convertColor(color),
+        color: formatRGBAColor(color),
       })),
     };
   } else {
@@ -239,22 +255,3 @@ function parsePaint(raw: Paint): SimplifiedFill {
   }
 }
 
-/**
- * Convert color from RGBA to { hex, opacity }
- *
- * @param color - The color to convert, including alpha channel
- * @param opacity - The opacity of the color, if not included in alpha channel
- * @returns The converted color
- **/
-function convertColor(color: RGBA, opacity = 1): ColorValue {
-  const r = Math.round(color.r * 255);
-  const g = Math.round(color.g * 255);
-  const b = Math.round(color.b * 255);
-
-  // Alpha channel defaults to 1. If opacity and alpha are both and < 1, their effects are multiplicative
-  const a = Math.round(opacity * color.a * 100) / 100;
-
-  const hex = "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
-
-  return { hex, opacity: a };
-}
