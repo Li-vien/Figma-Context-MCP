@@ -33,8 +33,8 @@ export class FigmaService {
     }
   }
 
-  async getFile(fileKey: string, depth?: number): Promise<GetFileResponse> {
-    const endpoint = `/files/${fileKey}${depth ? `?depth=${depth}` : ""}`;
+  async getFile(fileKey: string, nodeId: string, ): Promise<GetFileResponse> {
+    const endpoint = `/images/${fileKey}?ids=${nodeId}`;
     return this.request<GetFileResponse>(endpoint);
   }
 
@@ -42,7 +42,7 @@ export class FigmaService {
     const endpoint = `/files/${fileKey}/nodes?ids=${nodeId}${depth ? `&depth=10` : ""}`;
     const response = await this.request<GetFileNodesResponse>(endpoint);
     writeLogs("figma-raw.json", response);
-    const simplifiedResponse = parseFigmaResponse(response);
+    const simplifiedResponse = parseFigmaResponse(response, fileKey);
     writeLogs("figma-simplified.json", simplifiedResponse);
     return simplifiedResponse;
   }

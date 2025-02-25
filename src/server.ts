@@ -22,31 +22,31 @@ export class FigmaMcpServer {
   }
 
   private registerTools(): void {
-    // Tool to get file information
-    // this.server.tool(
-    //   "get_file",
-    //   "Get layout information about an entire Figma file",
-    //   {
-    //     fileKey: z.string().describe("The key of the Figma file to fetch"),
-    //     depth: z.number().optional().describe("How many levels deep to traverse the node tree"),
-    //   },
-    //   async ({ fileKey, depth }) => {
-    //     try {
-    //       console.log(`Fetching file: ${fileKey} (depth: ${depth ?? "default"})`);
-    //       const file = await this.figmaService.getFile(fileKey, depth);
-    //       console.log(`Successfully fetched file: ${file.name}`);
-    //       return {
-    //         content: [{ type: "text", text: JSON.stringify(file, null, 2) }],
-    //       };
-    //     } catch (error) {
-    //       console.error(`Error fetching file ${fileKey}:`, error);
-    //       return {
-    //         content: [{ type: "text", text: `Error fetching file: ${error}` }],
-    //       };
-    //     }
-    //   },
-    // );
-
+    this.server.tool(
+      "get_image", 
+      "根据figma数据中的image节点的imageRef获取图片", 
+      {
+        fileKey: z.string().describe("The key of the Figma file containing the node"),
+        nodeId: z.string().describe("The ID of the node to fetch")
+      },
+      async ({ fileKey, nodeId }) => {
+        try {
+          console.log(
+            `get image: ${nodeId} from file: ${fileKey}`,
+          );
+          const file = await this.figmaService.getFile(fileKey, nodeId);
+          console.log(`Successfully get image`, file);
+          return {
+            content: [{ type: "text", text: JSON.stringify({}, null, 2) }],
+          };
+        } catch (error) {
+          console.error(`Error fetching node ${nodeId} from file ${fileKey}:`, error);
+          return {
+            content: [{ type: "text", text: `Error fetching node: ${error}` }],
+          };
+        }
+      },
+    );  
     // Tool to get node information
     this.server.tool(
       "get_node",

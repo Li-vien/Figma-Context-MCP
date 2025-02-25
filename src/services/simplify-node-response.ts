@@ -47,7 +47,7 @@ export interface SimplifiedNode {
   id: string;
   name: string;
   type: string; // e.g. FRAME, TEXT, INSTANCE, RECTANGLE, etc.
-
+  size?: {};
   // geometry
   boundingBox?: BoundingBox;
   // text
@@ -98,22 +98,24 @@ export interface ColorValue {
 
 // ---------------------- PARSING ----------------------
 
-export function parseFigmaResponse(data: GetFileNodesResponse): SimplifiedDesign {
-  const { name, lastModified, thumbnailUrl, nodes } = data;
-  const globalVars: Record<string, any> = {};
+// 根据 ID 查找节点的辅助函数
+const findNodeById = (id: string, nodes: SimplifiedNode[]): SimplifiedNode | undefined => {
+  for (const node of nodes) {
+    if (node.id === id) {
+      return node;
+    }
+    
+    if (node.children && node.children.length > 0) {
+      const foundInChildren = findNodeById(id, node.children);
+      if (foundInChildren) {
+        return foundInChildren;
+      }
+    }
+  }
   
-  const simplifiedNodes: SimplifiedNode[] = Object.values(nodes).map(
-    (n) => parseNode(globalVars, n.document)
-  );
+  return undefined;
+};
 
-  return {
-    name,
-    lastModified,
-    thumbnailUrl,
-    nodes: simplifiedNodes,
-    globalVars,
-  };
-}
 
 /**
  * 查找或创建全局变量
@@ -141,6 +143,78 @@ function findOrCreateVar(
   globalVars[varId] = value;
   return varId;
 }
+
+export function parseFigmaResponse(data: GetFileNodesResponse, fileKey: string): SimplifiedDesign {
+  const { name, lastModified, thumbnailUrl, nodes } = data;
+  const globalVars: Record<string, any> = {
+    vectorParents: {}
+  };
+  
+  const simplifiedNodes: SimplifiedNode[] = Object.values(nodes).map(
+    (n) => parseNode(globalVars, n.document)
+  );
+  // 
+  
+  // 根据 childrenId 重组 vectorParents
+  const childrenToParents: Record<string, string[]> = {};
+  
+  // 遍历 vectorParents，按 childrenId 分组
+  Object.entries(globalVars.vectorParents).forEach(([parentId, data]) => {
+    const { childrenId } = data as { childrenId: string };
+    
+    if (!childrenToParents[childrenId]) {
+      childrenToParents[childrenId] = [];
+    }
+    
+    childrenToParents[childrenId].push(parentId);
+  });
+  
+  
+  
+  // 处理每组相同 childrenId 的父节点
+  Object.values(childrenToParents).forEach((parentIds) => {
+    // 查找所有父节点
+    parentIds.forEach(parentId => {
+      const imageRef = `https://api.figma.com/v1/images/${fileKey}?ids=${parentIds[0]}`
+      let parentNode = findNodeById(parentId, simplifiedNodes);
+      // 如果找到了父节点，直接修改它
+      if (parentNode) {
+        // 保存原始尺寸信息
+        const {id, size} = parentNode;
+        Object.keys(parentNode).forEach(key => {
+          delete parentNode[key as keyof SimplifiedNode];
+        })
+        Object.assign(parentNode, {
+          id,
+          name: "Image",
+          type: "IMAGE",
+          size,
+          fills:[
+            {
+              type: "IMAGE",
+              scaleMode: "FILL",
+              imageRef: imageRef,
+              opacity: 1
+            }
+          ]
+        })
+      }
+    });
+  });
+
+  // 将分组结果存储到 globalVars
+  globalVars.childrenToParents = childrenToParents;
+  delete globalVars.vectorParents;
+
+  return {
+    name,
+    lastModified,
+    thumbnailUrl,
+    nodes: simplifiedNodes,
+    globalVars,
+  };
+}
+
 
 function parseNode(globalVars: Record<string, any>, n: FigmaDocumentNode, parent?: FigmaDocumentNode): SimplifiedNode {
   const { id, name, type } = n;
@@ -221,6 +295,34 @@ function parseNode(globalVars: Record<string, any>, n: FigmaDocumentNode, parent
   // 递归处理子节点
   if (hasValue("children", n) && n.children.length > 0) {
     simplified.children = n.children.map((child) => parseNode(globalVars, child, n));
+  }
+  
+  if (hasValue("absoluteBoundingBox", n)) {
+    const { width, height } = n.absoluteBoundingBox || {};
+    simplified.size = {
+      width,
+      height
+    }
+  }
+
+  // 检测 VECTOR 类型节点并存储其父节点信息
+  if (type === "VECTOR") {
+    // 缓存 VECTOR 节点，使用前缀直接存储
+    const{ id: nodeId, ...vectorNodeData } = simplified;
+    
+    // 查找是否已存在相似的节点（忽略id）
+    const vectorId = findOrCreateVar(globalVars, vectorNodeData, 'vector');
+    
+    // 如果有父节点，存储关联信息
+    if (parent) {
+      // 存储 VECTOR 节点的父节点信息
+      globalVars.vectorParents[parent.id] = {
+        parentId: parent.id,
+        parentName: parent.name,
+        parentType: parent.type,
+        childrenId: vectorId
+      };
+    }
   }
 
   return removeEmptyKeys(simplified);
