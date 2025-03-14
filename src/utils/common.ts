@@ -31,6 +31,13 @@ export async function downloadFigmaImage(
       fs.mkdirSync(localPath, { recursive: true });
     }
 
+    // Check write permission
+    try {
+      fs.accessSync(localPath, fs.constants.W_OK);
+    } catch (err) {
+      throw new Error(`No write permission for directory: ${localPath}`);
+    }
+
     // Build the complete file path
     const fullPath = path.join(localPath, fileName);
 
@@ -56,6 +63,7 @@ export async function downloadFigmaImage(
 
       writer.on("error", (err: Error) => {
         // Delete partially downloaded file
+        writer.close();
         fs.unlink(fullPath, () => {});
         reject(new Error(`Failed to download image: ${err.message}`));
       });
