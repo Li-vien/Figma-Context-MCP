@@ -1,11 +1,11 @@
-import {
+import type {
   DropShadowEffect,
   InnerShadowEffect,
   BlurEffect,
   Node as FigmaDocumentNode,
 } from "@figma/rest-api-spec";
-import { formatRGBAColor } from "~/utils/common";
-import { hasValue } from "~/utils/identity";
+import { formatRGBAColor } from "~/utils/common.js";
+import { hasValue } from "~/utils/identity.js";
 
 export type SimplifiedEffects = {
   boxShadow?: string;
